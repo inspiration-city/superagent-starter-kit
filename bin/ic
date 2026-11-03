@@ -1,0 +1,124 @@
+<?php
+declare(strict_types=1);
+
+$root = dirname(__DIR__);
+require $root . '/src/Client.php';
+require $root . '/src/Knowledge.php';
+require $root . '/src/Context.php';
+
+function usage(int $status = 2): never {
+    fwrite(STDERR, "Usage:\n  php bin/ic [--agent <name>] [--base <workspace>] check|whoami|tools|refresh\n  php bin/ic context [phrase] [page=<page>] [--json]\n  php bin/ic help|version\n  --agent is a claimed enabled-room label; --base selects an owned workspace.\n  php bin/ic [--agent <name>] [--base <workspace>] exec <tool> [positional ...] [key=value ...]\n  php bin/ic [--agent <name>] [--base <workspace>] exec \"@tool ...\"\n");
+    exit($status);
+}
+
+$command = $argv[1] ?? '';
+if ($command === '' || in_array($command, ['help', '--help', '-h'], true)) usage(0);
+if (in_array($command, ['version', '--version'], true)) { echo "Superagent Starter Kit 0.3.1\n"; exit(0); }
+
+## --base retargets one call without touching .env; positional parsing below is unchanged.
+$baseOverride = '';
+foreach ($argv as $i => $arg) {
+    if ($arg === '--base' && (!isset($argv[$i + 1]) || str_starts_with($argv[$i + 1], '--'))) usage();
+    if ($arg === '--base' && isset($argv[$i + 1])) { $baseOverride = $argv[$i + 1]; unset($argv[$i], $argv[$i + 1]); }
+    elseif (str_starts_with($arg, '--base=')) { $baseOverride = substr($arg, 7); unset($argv[$i]); }
+}
+$argv = array_values($argv);
+
+## --agent selects the credential block for one call, exactly as IC_AGENT= does in the
+## process environment. It exists so the command can start with a constant `php bin/ic`
+## prefix whatever agent runs it — an IC_AGENT= prefix sits BEFORE the binary and makes
+## every agent a different command string, which a prefix-matched permission rule cannot
+## cover with one entry. Real environment still wins over .env, so this simply sets it.
+$agentOverride = '';
+foreach ($argv as $i => $arg) {
+    if ($arg === '--agent' && (!isset($argv[$i + 1]) || str_starts_with($argv[$i + 1], '--'))) usage();
+    if ($arg === '--agent' && isset($argv[$i + 1])) { $agentOverride = $argv[$i + 1]; unset($argv[$i], $argv[$i + 1]); }
+    elseif (str_starts_with($arg, '--agent=')) { $agentOverride = substr($arg, 8); unset($argv[$i]); }
+}
+$argv = array_values($argv);
+if ($agentOverride !== '') putenv('IC_AGENT=' . strtolower(trim($agentOverride)));
+
+function show(array $result): void {
+    $value = $result['output'] ?? $result['content'] ?? $result;
+    echo is_array($value) ? json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) : $value;
+    ## A literal \n, not PHP_EOL: the gateway separates rows with \n, so on Windows PHP_EOL
+    ## would append CRLF and give only the LAST row of a list a trailing \r. A caller looping
+    ## with `for p in $(...)` then reads a final element ending in \r, and the page lookup
+    ## fails as "not found" rather than as a quoting fault. Invisible on Linux, where the
+    ## two are identical — so it only ever breaks on this box.
+    echo "\n";
+}
+
+try {
+    $command = $argv[1] ?? '';
+    if (!in_array($command, ['check','whoami','tools','refresh','context','exec'], true)) usage();
+    $client = Client::fromEnvironment($root, $baseOverride);
+    if ($command === 'check') {
+        $who = $client->request('whoami');
+        $agent = trim((string)($who['agent'] ?? ''));
+        if ($agent !== $client->agent()) {
+            throw new RuntimeException("IC_AGENT is '{$client->agent()}', but the gateway returned claimed agent '" . ($agent ?: 'missing/unknown') . "'.");
+        }
+        echo "Connected to {$who['base']} as {$who['userid']}" . ($agent !== '' ? " (agent: $agent)" : '') . '.' . PHP_EOL;
+        exit(0);
+    }
+    if ($command === 'whoami' || $command === 'tools') {
+        show($client->request($command));
+        exit(0);
+    }
+    ## context assembles the LIVE bundle and caches nothing -- deliberately unlike refresh
+    ## below it, which keeps a local copy of documentation that changes rarely. Bookmarks,
+    ## memory, links, state and search are live or they are wrong.
+    if ($command === 'context') {
+        $phrase = '';
+        $page = '';
+        foreach (array_slice($argv, 2) as $part) {
+            if ($part === '--json') continue;
+            if (str_starts_with($part, 'page=')) { $page = substr($part, 5); continue; }
+            if (str_starts_with($part, 'phrase=')) { $phrase = substr($part, 7); continue; }
+            if ($phrase === '') $phrase = $part;
+        }
+        if ($page !== '' && !preg_match('/^[a-z0-9._-]+$/i', $page)) throw new RuntimeException('page= is not a valid page name.');
+        $bundle = Context::gather($client, trim($phrase), trim($page));
+        $text = in_array('--json', $argv, true)
+            ? json_encode($bundle, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            : Context::render($bundle);
+        echo $text . "
+";
+        exit(0);
+    }
+    if ($command === 'refresh') {
+        $files = Knowledge::refresh($client, $root);
+        echo 'Refreshed local IC knowledge: ' . implode(', ', $files) . '.' . PHP_EOL;
+        exit(0);
+    }
+    if ($command !== 'exec' || !isset($argv[2])) usage();
+    $tool = $argv[2];
+    if (str_starts_with($tool, '@')) {
+        show($client->request('exec', ['command' => $tool, 'line_encoding' => 'raw']));
+        exit(0);
+    }
+    if (!preg_match('/^[a-z][a-z0-9_-]*$/i', $tool)) throw new RuntimeException('Invalid tool name.');
+    $parts = [];
+    foreach (array_slice($argv, 3) as $part) {
+        [$key, $value] = array_pad(explode('=', $part, 2), 2, null);
+        if ($value !== null && preg_match('/^[a-z][a-z0-9_-]*$/i', $key)) {
+            $parts[] = $key . '="' . escape_arg($value) . '"';
+        } else {
+            $parts[] = '"' . escape_arg($part) . '"';
+        }
+    }
+    show($client->request('exec', ['command' => '@' . $tool . ($parts ? ' ' . implode(' ', $parts) : ''), 'line_encoding' => 'raw']));
+} catch (Throwable $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+}
+
+function escape_arg(string $value): string {
+    ## A double quote must survive the round trip, so it goes out in the one escaped form
+    ## the parser reads back: BOLTargs swaps \" for a sentinel before its regex and restores
+    ## it on each value. The old &quot; had no decoder anywhere and stored the entity.
+    ## A trailing backslash would escape the closing quote instead, so refuse it outright.
+    if (str_ends_with($value, '\\')) throw new RuntimeException('A value cannot end with a backslash.');
+    return str_replace('"', '\\"', $value);
+}

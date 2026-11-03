@@ -1,0 +1,36 @@
+<?php
+declare(strict_types=1);
+// Local export only. Read an exact allowlist; never discover config or browser logs.
+$root = realpath(dirname(__DIR__));
+$destination = $argv[1] ?? '';
+try {
+    if ($destination === '' || file_exists($destination)) throw new RuntimeException('Provide a new output directory outside the kit.');
+    $parent = realpath(dirname($destination));
+    if ($parent === false) throw new RuntimeException('Output parent must already exist.');
+    $target = $parent . DIRECTORY_SEPARATOR . basename($destination);
+    $rootPrefix = strtolower($root . DIRECTORY_SEPARATOR);
+    if (str_starts_with(strtolower($target . DIRECTORY_SEPARATOR), $rootPrefix) || in_array(basename($target), ['.','..'],true)) throw new RuntimeException('Output must be outside the kit.');
+    $files = file($root . '/RELEASE_FILES.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $contents = []; $hashes = []; $deny = (string)getenv('IC_PACKAGE_DENY');
+    foreach ($files as $file) {
+        if (!preg_match('~^[a-zA-Z0-9._/-]+$~',$file) || str_contains($file,'..') || str_starts_with($file,'/') || in_array($file,['.env','CLAUDE.local.md'],true) || preg_match('~(?:^|/)(?:\.gstack|\.superagent|vendor)(?:/|$)|\.log$~',$file)) throw new RuntimeException('Unsafe release entry.');
+        $path=$root . '/' . $file; $resolved=realpath($path);
+        if ($resolved===false || !is_file($path) || !str_starts_with(strtolower($resolved),strtolower($root . DIRECTORY_SEPARATOR))) throw new RuntimeException('Missing or external release file.');
+        $cursor=$path;
+        while ($cursor!==$root && strlen($cursor)>strlen($root)) { if(is_link($cursor)) throw new RuntimeException('Release links refused.'); $cursor=dirname($cursor); }
+        $content=file_get_contents($path);
+        // Token-shaped hex and home-directory paths. IC_PACKAGE_DENY adds a private pattern (your own username, say) without writing it into the kit.
+        if ($content===false || preg_match('~\b[a-f0-9]{48}\b|C:[/\\\\]Users[/\\\\]|/home/[a-z]|/Users/[a-z]~i',$content) || ($deny!=='' && preg_match('~'.str_replace('~','\~',$deny).'~i',$content))) throw new RuntimeException('Release hygiene check failed; review selected files privately.');
+        if (str_contains($content, "\0")) throw new RuntimeException('Binary release content refused.');
+        if ($file === '.env.example' && preg_match('/^IC_TOKEN=(?!paste-the-token-here\r?$).+/m', $content)) throw new RuntimeException('Unexpected config example value.');
+        $contents[$file]=$content; $hashes[$file]=hash('sha256',$content);
+    }
+    if (!mkdir($target,0700)) throw new RuntimeException('Could not create output.');
+    foreach($contents as $file=>$content) {
+        $path=$target.'/'.$file;
+        if(!is_dir(dirname($path)) && !mkdir(dirname($path),0700,true)) throw new RuntimeException('Could not create output folder.');
+        if(file_put_contents($path,$content)!==strlen($content)) throw new RuntimeException('Could not export file.');
+    }
+    if(file_put_contents($target.'/SHA256SUMS.json',json_encode($hashes,JSON_PRETTY_PRINT|JSON_THROW_ON_ERROR)."\n")===false) throw new RuntimeException('Could not write manifest.');
+    echo 'LOCAL ONLY: exported '.count($hashes)." allowlisted files. Not published.\n";
+} catch(Throwable $e) { fwrite(STDERR,'Error: '.$e->getMessage()."\n"); exit(1); }

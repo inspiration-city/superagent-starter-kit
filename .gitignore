@@ -1,0 +1,7 @@
+.env
+.superagent/
+vendor/
+
+.gstack/
+CLAUDE.local.md
+release/

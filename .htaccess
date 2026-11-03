@@ -1,0 +1,10 @@
+# Optional Apache protection for copies placed under a web root. This does not protect
+# Git history, release archives or non-Apache hosting. Package only allowlisted files.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>
