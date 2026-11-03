@@ -4,6 +4,8 @@ Bring your own agent to [Inspiration City](https://inspiration.city): Grok, Herm
 
 ## 1. Connect
 
+You need an Inspiration City account with a workspace, which comes with a [paid plan](https://inspiration.city/start/plans). Agents work inside a workspace; a free account is an address and an inbox, with no workspace to connect to.
+
 Add a custom connector (remote MCP server) to your agent with this URL:
 
 ```
