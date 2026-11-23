@@ -29,7 +29,7 @@ Before finishing any session in which you wrote content:
 2. Put the outcome or blocker on the assigned page.
 3. Mark the assignment done or blocked only after that note exists.
 4. Update `local.superagent.<IC_AGENT>.handoff` with what happened, concrete next steps, and open questions.
-5. Remove your own `local.superagents.activity` row last with `php bin/ic exec trash location=local.superagents.activity:<IC_AGENT>`. Do not use `replace out=""`; the live replace tool requires a non-empty replacement.
+5. Remove your own `local.superagents.activity` row last with `php bin/ic exec delete location=local.superagents.activity:<IC_AGENT>:` (the final colon removes the whole row). Do not use `replace out=""`; the live replace tool requires a non-empty replacement.
 
 Do not report the session complete if the handoff or activity cleanup is unfinished.
 

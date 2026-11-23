@@ -12,6 +12,6 @@ The JSON API is the automation surface. The browser room is the visible workbenc
 
 The owner enables a room, then supplies the workspace owner token out of band. One token serves all enabled agents and the owner's places. The agent name is a claimed label, not an authenticated identity or room permission boundary. Rotation invalidates every worker using the token; there is no per-agent revocation. Room links are navigation, not access isolation. Use Superagents > token for owner-side rotation.
 
-Before any content edit, inspect `local.superagents.activity` and register the session with agent, purpose, start time, pages being touched, and status. This includes reports and room-owned pages, not only shared product work. At session close, update the handoff, then remove your keyed activity row with `@trash location="local.superagents.activity:<agent>"`. Do not rewrite the activity page or use an empty replacement.
+Before any content edit, inspect `local.superagents.activity` and register the session with agent, purpose, start time, pages being touched, and status. This includes reports and room-owned pages, not only shared product work. At session close, update the handoff, then remove your keyed activity row with `@delete location="local.superagents.activity:<agent>:"`. Do not rewrite the activity page or use an empty replacement.
 
 Use `@read` for stored source and `@snapshot` for what a composed page actually presents.
