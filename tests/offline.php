@@ -37,11 +37,23 @@ try {
             try { Client::validateResponse(['ok'=>$ok,'failed'=>true,'output'=>$message],200); throw new RuntimeException('invalid success envelope must reject'); }
             catch (GatewayException $e) { expect(!str_contains($e->getMessage(),$message),'invalid envelope cannot show tool validation'); }
         }
-        foreach ([$message.' synthetic-secret', "synthetic-secret\n".$message, ' '.$message, $message."\n", strtolower($message)] as $modified) {
+        foreach ([$message.' synthetic-secret', "synthetic-secret\n".$message, ' '.$message, $message."\n"] as $modified) {
             try { Client::validateResponse(['ok'=>true,'failed'=>true,'output'=>$modified],200); throw new RuntimeException('modified validation must reject'); }
-            catch (GatewayException $e) { expect($e->getMessage()==='IC tool aborted.','no prefix suffix whitespace or case-fold disclosure'); }
+            catch (GatewayException $e) { expect($e->getMessage()==='IC tool aborted.','no secret, extra line or padding disclosure'); }
         }
     }
+    // A tool's own one-line refusal reaches the agent; diagnostics, paths and credentials do not.
+    $reason = 'notes.bridge is a folder. Use trash folder=notes.bridge to send it and everything in it to the Recycle Bin.';
+    try { Client::validateResponse(['ok'=>true,'failed'=>true,'output'=>$reason],200); throw new RuntimeException('refusal must reject'); }
+    catch (GatewayException $e) { expect($e->getMessage()==='IC tool aborted. '.$reason && $e->kind==='tool','plain refusal reason is shown'); }
+    try { Client::validateResponse(['ok'=>true,'failed'=>true,'output'=>"Source not found.\n~abort~"],200); throw new RuntimeException('abort must reject'); }
+    catch (GatewayException $e) { expect($e->getMessage()==='IC tool aborted. Source not found.','abort sentinel dropped, reason shown'); }
+    foreach (['Could not open /var/www/site/icity/x', 'Failed in C:\\xampp\\htdocs\\api\\cli.php', 'Call to undefined function in io.php', 'PHP Warning: something', 'Invalid token for this vault.', str_repeat('long ', 120)] as $leak) {
+        try { Client::validateResponse(['ok'=>true,'failed'=>true,'output'=>$leak],200); throw new RuntimeException('leak must reject'); }
+        catch (GatewayException $e) { expect($e->getMessage()==='IC tool aborted.','path, diagnostic, credential or overlong reason stays hidden: '.substr($leak,0,30)); }
+    }
+    try { Client::validateResponse(['ok'=>true,'failed'=>true,'output'=>$reason],500); throw new RuntimeException('500 must reject'); }
+    catch (GatewayException $e) { expect(!str_contains($e->getMessage(),'folder'),'reason never shown off HTTP 200'); }
     foreach (["PHP Fatal error: synthetic-secret C:/private/path\nStack trace: fixture", 'Authorization: Bearer fixture-only-secret', ['error'=>'synthetic-secret'], 123] as $output) {
         try { Client::validateResponse(['ok'=>true,'failed'=>true,'output'=>$output],200); throw new RuntimeException('arbitrary failure must reject'); }
         catch (GatewayException $e) { expect($e->getMessage()==='IC tool aborted.','arbitrary errors paths traces and tokens stay hidden'); }

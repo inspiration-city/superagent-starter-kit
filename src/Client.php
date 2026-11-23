@@ -133,6 +133,10 @@ final class Client {
             // hint is what stops an agent guessing the same missing name again.
             if (!$known && $status === 200 && is_string($output))
                 $known = (bool)preg_match('/\AUnknown shortcut: @[a-z0-9_-]{1,40}\.(?: There is no @[a-z]+ tool\.[^\n]{0,300}| Call @tools to list the tools you can use\.)\z/', $output);
+            // A tool's refusal is one plain sentence saying why ("notes.x is a folder. Use trash
+            // folder=..."), and without it an agent can only guess. Show that shape; keep hiding
+            // anything that looks like a PHP diagnostic, a file path or a credential.
+            if (!$known && $status === 200 && is_string($output)) $known = self::plainReason($output);
             throw new GatewayException('IC tool aborted.' . ($known ? ' ' . $output : ''), 'tool');
         }
         if (is_string($output) && (preg_match('/(?:^|\n)\s*~abort~\s*(?:$|\n)/', $output) || preg_match('/\A\s*(?:Error:|Target not found:|Invalid token|Missing agent name|Unknown shortcut:)/i', $output))) {
@@ -140,6 +144,11 @@ final class Client {
             throw new GatewayException('IC tool aborted.', $kind);
         }
         return $result;
+    }
+
+    private static function plainReason(string $text): bool {
+        if ($text === '' || strlen($text) > 500 || trim($text) !== $text || preg_match('/[\x00-\x1f\x7f]/', $text)) return false;
+        return !preg_match('/fatal|warning:|notice:|deprecated:|stack trace|uncaught|exception|\.php\b|[a-z]:[\\\\\/]|\/(?:home|var|usr|tmp|etc|srv|opt)\/|bearer|authorization|token|secret|password|api[_-]?key/i', $text);
     }
 
     private static function loadEnv(string $file): void {
